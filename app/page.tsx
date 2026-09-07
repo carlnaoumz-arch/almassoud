@@ -1,7 +1,7 @@
 'use client';
 import {useHeroPlayback} from '../hooks/use-hero-playback';
 import {ArrowUpRight,ArrowDown,Pause,Play,Phone,MapPin} from 'lucide-react';
-const MENU='https://almassoud.com/menu/';
+const MENU='/menu';
 const dishes=[{name:'Boneless Farrouj',note:'THE SIGNATURE',image:'farrouj',description:'Flame-grilled chicken, garlic bread, fries, pickles and our signature garlic.'},{name:'Djej Al Massoud',note:'ALL-TIME FAVOURITE',image:'djej',description:'Al Massoud chicken, pickles, garlic cream and our special sauce.'},{name:'Taouk',note:'STRAIGHT FROM THE GRILL',image:'taouk',description:'Marinated chicken breast, fries, coleslaw, pickles and garlic paste.'}];
 export default function Home(){
  const {scene,video,ready,paused,toggleMotion}=useHeroPlayback();

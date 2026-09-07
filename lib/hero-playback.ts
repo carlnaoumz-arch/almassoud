@@ -28,7 +28,7 @@ export function createHeroPlayback(
   let destroyed = false, paused = false, active = true;
   let reduced = options.reducedMotion ?? false;
   let ready = false, intro = true, playPending = false, introPlaying = false;
-  let target = 0, eased = 0, frame = 0, retry = 0, retryCount = 0;
+  let target = 0, eased = 0, frame = 0, retry = 0, retryCount = 0, wake = 0;
   let lastTime = clock.now(), playVersion = 0;
   const listeners: Array<[string, EventListener]> = [];
   const blocked = () => destroyed || paused || reduced || !active;
@@ -45,25 +45,40 @@ export function createHeroPlayback(
     introPlaying = false;
     video.pause();
   }
+  function waitForDecoder() {
+    if (!wake && !blocked()) wake = clock.delay(() => {
+      wake = 0;
+      refresh();
+      schedule();
+    }, 100);
+  }
   function tick(time: number) {
     frame = 0;
-    if (blocked() || !ready || video.readyState < 2 || !validDuration()) return;
+    if (blocked()) return;
     const dt = Math.min(64, Math.max(1, time - lastTime));
     lastTime = time;
+    // Follow scroll with a short time-based ease, independent of display refresh rate.
+    eased += (target - eased) * (1 - Math.exp(-dt / 85));
+    if (Math.abs(target - eased) < .0005) eased = target;
+    callbacks.onProgress(eased);
+    // A paused video can drop to HAVE_METADATA during a seek and omit canplay.
+    // Keep the latest target alive instead of waiting for another user scroll.
+    if (!ready || video.readyState < 2 || !validDuration()) {
+      if (Math.abs(target - eased) >= .0005) schedule();
+      waitForDecoder();
+      return;
+    }
     if (intro) {
       if (video.currentTime < introEnd()) { schedule(); return; }
       intro = false;
       stopPlayback();
     }
-    // Follow scroll with a short time-based ease, independent of display refresh rate.
-    eased += (target - eased) * (1 - Math.exp(-dt / 85));
-    if (Math.abs(target - eased) < .0005) eased = target;
-    callbacks.onProgress(eased);
     // Never interrupt an in-flight decoder seek. seeked always picks up the latest target.
     if (!video.seeking && Math.abs(video.currentTime - timeAt(eased)) > 1 / 48) {
       try { video.currentTime = timeAt(eased); } catch { /* Retry after the next media-ready event. */ }
     }
     if (Math.abs(target - eased) >= .0005) schedule();
+    if (video.seeking) waitForDecoder();
   }
   function playIntro() {
     if (!intro || blocked() || !ready || playPending || introPlaying) return;
@@ -150,6 +165,7 @@ export function createHeroPlayback(
       destroyed = true;
       stopPlayback();
       if (frame) clock.cancelFrame(frame);
+      if (wake) clock.cancelDelay(wake);
       if (retry) clock.cancelDelay(retry);
       listeners.forEach(([name, listener]) => video.removeEventListener(name, listener));
     },

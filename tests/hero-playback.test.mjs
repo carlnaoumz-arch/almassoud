@@ -109,3 +109,26 @@ test('cleanup cancels retries, animation work and late playback completions', as
   assert.equal(c.video.loadCalls, 0); assert.equal(c.clock.frames.size, 0);
   c.video.becomeReady(); assert.equal(c.clock.frames.size, 0);
 });
+
+test('a cold-load first scroll progresses and catches up without a second scroll or media event', () => {
+  const c = setup(); c.playback.setProgress(.75);
+  for (let i = 0; i < 20; i++) c.clock.step();
+  assert.ok(c.positions.at(-1) > .7, 'page motion responds while video is loading');
+  // Simulate a decoder that becomes ready without another loadeddata/canplay event.
+  c.video.duration = 10.042; c.video.readyState = 2;
+  settle(c);
+  assert.equal(c.readiness.at(-1), true);
+  assert.ok(c.video.currentTime > 7.7);
+  c.playback.destroy();
+});
+
+test('seek readiness dropping to HAVE_METADATA cannot strand the final target', () => {
+  const c = setup({ cached: true }); c.playback.setProgress(.9); c.clock.step();
+  c.video.readyState = 1;
+  c.playback.setProgress(.65);
+  for (let i = 0; i < 50; i++) c.clock.step();
+  c.video.seeking = false; c.video.readyState = 2; // Deliberately omit seeked/canplay.
+  settle(c);
+  assert.ok(Math.abs(c.video.currentTime - (1.2 + (10.042 - .06 - 1.2) * .65)) < .025);
+  c.playback.destroy();
+});

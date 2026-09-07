@@ -31,3 +31,13 @@ test('never treats an authentication page as a video and bounds automatic retrie
   await assert.rejects(fetchCompleteVideo(async () => { attempts++; return new Response('<html>Sign in</html>', { headers: { 'content-type': 'text/html' } }); }, async () => {}));
   assert.equal(attempts, 3);
 });
+
+test('accepts an intact MP4 served as application/octet-stream', async () => {
+  const bytes = new Uint8Array([0, 0, 0, 20, 102, 116, 121, 112, 105, 115, 111, 109]);
+  const blob = await fetchCompleteVideo(async () => new Response(bytes, { headers: { 'content-type': 'application/octet-stream' } }));
+  assert.deepEqual(new Uint8Array(await blob.arrayBuffer()), bytes);
+});
+
+test('does not mistake generic binary HTML for an MP4', async () => {
+  await assert.rejects(fetchCompleteVideo(async () => new Response('<html>Not a video</html>', { headers: { 'content-type': 'application/octet-stream' } }), async () => {}));
+});

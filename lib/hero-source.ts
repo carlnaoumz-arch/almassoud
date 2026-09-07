@@ -12,11 +12,16 @@ export async function fetchCompleteVideo(
         credentials: 'same-origin', mode: 'cors', cache: 'force-cache', priority: 'high',
       });
       // Never turn a partial response or a sign-in/error HTML page into a video source.
-      if (response.status !== 200 || !response.headers.get('content-type')?.startsWith('video/')) {
+      const mime = response.headers.get('content-type')?.split(';')[0].trim();
+      if (response.status !== 200 || !(mime?.startsWith('video/') || mime === 'application/octet-stream' || mime === 'binary/octet-stream')) {
         throw new Error('Complete video response unavailable');
       }
       const blob = await response.blob();
       if (!blob.size) throw new Error('Empty video response');
+      if (!mime?.startsWith('video/')) {
+        const signature = new TextDecoder().decode(await blob.slice(4, 8).arrayBuffer());
+        if (signature !== 'ftyp') throw new Error('Response is not an MP4');
+      }
       return blob;
     } catch (error) {
       if (attempt >= 2) throw error;

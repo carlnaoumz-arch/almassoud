@@ -32,10 +32,22 @@ export function useHeroPlayback() {
         const completeFile = await getCompleteHeroVideo();
         if (disposed) return;
         objectUrl = URL.createObjectURL(completeFile);
+        // The normal <source> plays from the first render. A complete memory copy
+        // is an enhancement, never a prerequisite for seeing the animation.
+        const previousTime = film.currentTime;
+        const restoreTime = () => {
+          film.removeEventListener('loadedmetadata', restoreTime);
+          if (disposed) return;
+          if (Number.isFinite(previousTime)) film.currentTime = Math.min(previousTime, film.duration - .06);
+          playback.refresh();
+        };
+        film.addEventListener('loadedmetadata', restoreTime, { once: true });
         film.src = objectUrl;
         film.load();
         playback.refresh();
       } catch {
+        // A fetch/CORS/content-type failure must never remove native video playback.
+        playback.refresh();
         // Allow a transient first-request/auth/network failure to recover without refreshing.
         if (!disposed && sourceAttempts < 3) sourceRetry = window.setTimeout(() => {
           sourceRetry = 0;

@@ -1,14 +1,14 @@
 import {SiteHeader} from '../../components/site-header';
-import { ArrowDown, ArrowLeft, ArrowUpRight, Phone } from 'lucide-react';
-import { menuSections } from './menu-data';
+import { ArrowUpRight, Phone } from 'lucide-react';
+import { MenuBrowser } from './menu-browser';
+import './menu.css';
 
 export default function MenuPage() {
-  return <main className="diner-menu" id="top">
+  return <main className="menu-catalog" id="top">
     <SiteHeader/>
-    <section className="menu-hero"><div><p className="eyebrow">AL MASSOUD DINER</p><h1>The menu<br/><em>you came for.</em></h1><p>Made fresh. Made generous. Made for sharing.</p><a href="#starters" className="menu-jump">EXPLORE THE MENU <ArrowDown size={17}/></a></div><div className="menu-hero-mark"><span>GOOD FOOD<br/>MADE GOOD</span><strong>1632</strong></div></section>
-    <nav className="category-rail" aria-label="Menu categories">{menuSections.map(section=><a href={'#'+section.id} key={section.id}>{section.title}</a>)}</nav>
-    <section className="menu-list">{menuSections.map((section,index)=><article className="menu-category" id={section.id} key={section.id}><div className="category-heading"><span>0{index + 1}</span><p>{section.kicker}</p><h2>{section.title}</h2></div><div className="category-photo"><img src={'/menus/'+section.image} alt={section.title+' from Al Massoud Diner'} loading={index < 2 ? 'eager' : 'lazy'} width="1273" height="1800"/></div><div className="item-list">{section.items.map(([name,price,description])=><div className="menu-item" key={name}><div><h3>{name}</h3><p>{description}</p></div><strong>{price}</strong></div>)}</div></article>)}</section>
-    <section className="menu-cta"><div><p className="eyebrow">HUNGER DOESN'T WAIT</p><h2>Ready when<br/>you are.</h2></div><a href="tel:1632" className="button light"><Phone size={18}/> ORDER NOW · 1632 <ArrowUpRight size={18}/></a></section>
+    <section className="catalog-intro" id="menu-top"><div><p className="catalog-eyebrow">AL MASSOUD DINER · FANAR & MTAYLEB</p><h1>A taste of<br/><em>the good life.</em></h1><p className="catalog-subtitle">Your table favourites, from the first bite to the last.</p><span className="currency-note">All prices in USD · Portions & extras listed with each dish</span></div><figure><img src="/menu-food/p16-0.webp" alt="Boneless Farrouj Al Massoud with fries, garlic and coleslaw" width="260" height="260" fetchPriority="high"/><figcaption>Our signature. Your favourite.</figcaption></figure></section>
+    <MenuBrowser/>
+    <section className="catalog-order"><div><p className="catalog-eyebrow">GOOD FOOD MADE GOOD</p><h2>Come hungry.</h2></div><a href="tel:1632" className="button light"><Phone size={18}/> ORDER NOW · 1632 <ArrowUpRight size={18}/></a></section>
     <footer><div className="footer-top"><a href="/#top" className="footer-brand"><img src="/logo.png" alt="Al Massoud" width="180" height="67"/></a><p>Good food made good.<br/><span>Made to bring us together.</span></p></div><div className="footer-bottom"><span>© {new Date().getFullYear()} Al Massoud</span><a href="#top">BACK TO TOP ↑</a></div></footer>
   </main>;
 }

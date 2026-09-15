@@ -78,8 +78,10 @@ export function createHeroFrames<T extends { close(): void }>(
 
 export async function loadHeroFrame(index: number, signal: AbortSignal) {
   const response = await fetch(heroFrameUrl(index), { signal, cache: 'force-cache', priority: 'high' });
-  if (!response.ok || !response.headers.get('content-type')?.startsWith('image/')) throw new Error('Frame unavailable');
-  const blob = await response.blob();
+  if (!response.ok) throw new Error('Frame unavailable');
+  // Hosting can serve WebP assets as application/octet-stream. Give Safari's
+  // decoder the known asset format instead of depending on the server MIME.
+  const blob = new Blob([await response.blob()], { type: 'image/webp' });
   if (typeof createImageBitmap === 'function') {
     const bitmap = await createImageBitmap(blob);
     return { image: bitmap as CanvasImageSource, close: () => bitmap.close() };

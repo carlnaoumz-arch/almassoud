@@ -1,6 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createHeroFrames, HERO_FRAME_COUNT } from '../lib/hero-frames.ts';
+import { createHeroFrames, HERO_FRAME_COUNT, loadHeroFrame } from '../lib/hero-frames.ts';
+test('hosted octet-stream frames reach the decoder with the WebP MIME type', async t => {
+  let decodedType;
+  t.mock.method(globalThis, 'fetch', async () => new Response(new Uint8Array([82,73,70,70]), { headers: { 'content-type': 'application/octet-stream' } }));
+  const previous = globalThis.createImageBitmap;
+  globalThis.createImageBitmap = async blob => { decodedType = blob.type; return { close() {} }; };
+  try { const asset = await loadHeroFrame(0, new AbortController().signal); asset.close(); assert.equal(decodedType, 'image/webp'); }
+  finally { if (previous) globalThis.createImageBitmap = previous; else delete globalThis.createImageBitmap; }
+});
 class Clock {
   time = 0; id = 0; frames = new Map();
   now = () => this.time;

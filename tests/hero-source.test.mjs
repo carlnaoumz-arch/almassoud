@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fetchCompleteVideo } from '../lib/hero-source.ts';
+import { fetchCompleteVideo, readCachedHero } from '../lib/hero-source.ts';
 
 test('does not expose a source until every original byte has arrived', async () => {
   let finish;
@@ -40,4 +40,18 @@ test('accepts an intact MP4 served as application/octet-stream', async () => {
 
 test('does not mistake generic binary HTML for an MP4', async () => {
   await assert.rejects(fetchCompleteVideo(async () => new Response('<html>Not a video</html>', { headers: { 'content-type': 'application/octet-stream' } }), async () => {}));
+});
+
+test('restores complete video bytes across page loads without a network fetch', async () => {
+  const original = new Uint8Array([0, 0, 0, 20, 102, 116, 121, 112]);
+  const storage = { open: async () => ({ match: async () => new Response(original, { headers: { 'content-type': 'video/mp4' } }) }) };
+  const blob = await readCachedHero(storage);
+  assert.deepEqual(new Uint8Array(await blob.arrayBuffer()), original);
+});
+
+test('blocked storage and invalid cached responses leave normal playback available', async () => {
+  assert.equal(await readCachedHero({ open: async () => { throw new Error('Storage unavailable'); } }), undefined);
+  for (const response of [new Response('Sign in', { headers: { 'content-type': 'text/html' } }), new Response('part', { status: 206, headers: { 'content-type': 'video/mp4' } })]) {
+    assert.equal(await readCachedHero({ open: async () => ({ match: async () => response }) }), undefined);
+  }
 });

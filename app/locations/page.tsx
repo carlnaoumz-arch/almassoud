@@ -1,4 +1,3 @@
-import Link from 'next/link';
 import { SiteHeader } from '../../components/site-header';
 import { MapPin, ArrowUpRight } from 'lucide-react';
 
@@ -16,6 +15,6 @@ export default function Locations() {
       <a className="text-link" href={'https://www.google.com/maps/search/?api=1&query='+encodeURIComponent('Al Massoud '+address+' Lebanon')} target="_blank" rel="noopener noreferrer">OPEN MAP <ArrowUpRight size={18}/><span className="sr-only"> (opens in a new tab)</span></a>
       <a className="location-call" href="tel:1632">CALL 1632</a>
     </article>)}</section>
-    <footer><Link className="footer-brand" href="/#top" aria-label="Al Massoud home"><img src="/logo.png" alt="Al Massoud" width="145" height="54"/></Link><p><Link href="/#top">← Back to home</Link></p></footer>
+    <footer><a className="footer-brand" href="/#top" aria-label="Al Massoud home"><img src="/logo.png" alt="Al Massoud" width="145" height="54"/></a><p><a href="/#top">← Back to home</a></p></footer>
   </main>;
 }

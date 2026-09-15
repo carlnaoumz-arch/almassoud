@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import { createHeroPlayback } from '../lib/hero-playback';
-import { peekHeroSource, pendingHeroSource, prepareHeroSource } from '../lib/hero-source';
+import { peekHeroSource, pendingHeroSource, prepareHeroSource, restoreHeroSource } from '../lib/hero-source';
 
 export function useHeroPlayback() {
   const scene = useRef<HTMLElement>(null);
@@ -17,9 +17,9 @@ export function useHeroPlayback() {
     let disposed = false, frame = 0;
     const cached = peekHeroSource();
     if (cached && film.src !== cached) { film.src = cached; film.load(); }
-    const useCompleteSource = (source: Promise<string>) => {
+    const useCompleteSource = (source: Promise<string | undefined>) => {
       void source.then(url => {
-        if (disposed || film.src === url) return;
+        if (disposed || !url || film.src === url) return;
         film.src = url;
         playback.sourceChanged();
       }).catch(() => { /* Keep streaming and allow the controller to recover. */ });
@@ -34,7 +34,7 @@ export function useHeroPlayback() {
     }, { reducedMotion: media.matches });
     controller.current = playback;
     const pending = pendingHeroSource();
-    if (!cached && pending) useCompleteSource(pending);
+    if (!cached) useCompleteSource(pending ?? restoreHeroSource());
     const measure = () => {
       frame = 0;
       const stickyHeight = element.firstElementChild?.getBoundingClientRect().height ?? window.innerHeight;

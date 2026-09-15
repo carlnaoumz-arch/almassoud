@@ -17,14 +17,14 @@ class FakeClock {
   }
 }
 class FakeVideo extends EventTarget {
-  readyState = 0; duration = NaN; seeking = false; time = 0;
+  readyState = 0; duration = NaN; seeking = false; time = 0; paused = true;
   muted = false; defaultMuted = false; playsInline = false; error = null;
   playCalls = 0; pauseCalls = 0; loadCalls = 0; seeks = []; rejectPlay = false;
   get currentTime() { return this.time; }
   set currentTime(value) { this.seeks.push(value); this.time = value; this.seeking = true; }
-  play() { this.playCalls++; return this.rejectPlay ? Promise.reject(new Error('NotAllowedError')) : Promise.resolve(); }
-  pause() { this.pauseCalls++; }
-  load() { this.loadCalls++; this.readyState = 0; this.duration = NaN; this.error = null; }
+  play() { this.playCalls++; if (!this.rejectPlay) this.paused = false; return this.rejectPlay ? Promise.reject(new Error('NotAllowedError')) : Promise.resolve(); }
+  pause() { this.pauseCalls++; this.paused = true; }
+  load() { this.loadCalls++; this.paused = true; this.seeking = false; this.time = 0; this.readyState = 0; this.duration = NaN; this.error = null; }
   completeSeek() { this.seeking = false; this.dispatchEvent(new Event('seeked')); }
   becomeReady() { this.duration = 10.042; this.readyState = 3; this.dispatchEvent(new Event('canplay')); }
 }
@@ -130,5 +130,99 @@ test('seek readiness dropping to HAVE_METADATA cannot strand the final target', 
   c.video.seeking = false; c.video.readyState = 2; // Deliberately omit seeked/canplay.
   settle(c);
   assert.ok(Math.abs(c.video.currentTime - (1.2 + (10.042 - .06 - 1.2) * .65)) < .025);
+  c.playback.destroy();
+});
+
+test('a fractional restored scroll cannot strand the cold intro', async () => {
+  const c = setup();
+  c.playback.setProgress(.0003);
+  c.video.becomeReady();
+  await Promise.resolve();
+  assert.equal(c.video.playCalls, 1);
+  assert.equal(c.video.paused, false);
+  c.playback.destroy();
+});
+
+test('obsolete play completion cannot pause a replacement controller', async () => {
+  const video = new FakeVideo(), clock = new FakeClock(), completions = [];
+  video.readyState = 4; video.duration = 10.042;
+  video.play = () => { video.playCalls++; video.paused = false; return new Promise(resolve => completions.push(resolve)); };
+  const callbacks = { onReady() {}, onProgress() {} };
+  const old = createHeroPlayback(video, callbacks, { clock });
+  old.destroy();
+  const current = createHeroPlayback(video, callbacks, { clock });
+  completions[1](); await Promise.resolve();
+  const pauses = video.pauseCalls;
+  completions[0](); await Promise.resolve();
+  assert.equal(video.pauseCalls, pauses);
+  assert.equal(video.paused, false);
+  current.destroy();
+});
+
+test('browser-imposed pause resumes the intro on page restoration', async () => {
+  const c = setup({ cached: true }); await Promise.resolve();
+  c.video.pause();
+  c.playback.resumeLoading(); await Promise.resolve();
+  assert.equal(c.video.playCalls, 2);
+  assert.equal(c.video.paused, false);
+  c.playback.setActive(false);
+  assert.equal(c.clock.frames.size, 0);
+  c.playback.setActive(true); await Promise.resolve();
+  assert.equal(c.video.paused, false);
+  c.playback.destroy();
+});
+
+test('silent seek stall recovers without another scroll or media error', () => {
+  const c = setup({ cached: true });
+  c.playback.setProgress(.8); c.clock.step();
+  for (let i = 0; i < 90; i++) c.clock.step(100);
+  assert.equal(c.video.loadCalls, 1);
+  c.video.becomeReady(); settle(c);
+  assert.ok(Math.abs(c.video.currentTime - (1.2 + (10.042 - .06 - 1.2) * .8)) < .025);
+  c.playback.destroy();
+});
+
+test('a rejected seek retries without depending on a new media event', () => {
+  const c = setup({ cached: true }); let reject = true;
+  Object.defineProperty(c.video, 'currentTime', {
+    get() { return this.time; },
+    set(value) { if (reject) { reject = false; throw new Error('decoder busy'); } this.time = value; this.seeking = true; },
+  });
+  c.playback.setProgress(.5); settle(c);
+  assert.ok(c.video.currentTime > 5);
+  c.playback.destroy();
+});
+
+test('switching to a cached full source preserves the latest scroll target', () => {
+  const c = setup({ cached: true });
+  c.playback.setProgress(.6); settle(c);
+  c.playback.sourceChanged();
+  c.video.becomeReady(); settle(c);
+  assert.ok(Math.abs(c.video.currentTime - (1.2 + (10.042 - .06 - 1.2) * .6)) < .025);
+  c.playback.destroy();
+});
+
+test('suspending cancels a queued recovery; a replacement source loads only once', () => {
+  for (const action of ['setPaused', 'setActive', 'sourceChanged']) {
+    const c = setup({ cached: true });
+    c.playback.setProgress(.8); c.clock.step();
+    for (let i = 0; i < 61; i++) c.clock.step(100);
+    if (action === 'sourceChanged') c.playback.sourceChanged();
+    else c.playback[action](action === 'setPaused');
+    const loads = c.video.loadCalls;
+    c.clock.step(1000);
+    assert.equal(c.video.loadCalls, loads, action);
+    c.playback.destroy();
+  }
+});
+
+test('permanent decoder failure becomes idle after bounded recovery', () => {
+  const c = setup(); c.playback.setProgress(.8);
+  for (let i = 0; i < 300; i++) c.clock.step(100);
+  assert.equal(c.video.loadCalls, 2);
+  assert.equal(c.clock.frames.size, 0);
+  assert.equal(c.clock.timers.size, 0);
+  c.playback.resumeLoading(); c.video.becomeReady(); settle(c);
+  assert.ok(c.video.currentTime > 8);
   c.playback.destroy();
 });

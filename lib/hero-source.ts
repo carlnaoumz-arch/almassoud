@@ -1,6 +1,8 @@
 // Preload and fetch use the same URL so the full response is shared by the browser.
 export const HERO_VIDEO_URL = '/farrouj-assembly.mp4?delivery=complete-v1';
 let pending: Promise<Blob> | undefined;
+let cachedUrl: string | undefined;
+let preparing: Promise<string> | undefined;
 
 export async function fetchCompleteVideo(
   fetcher: typeof fetch = fetch,
@@ -34,3 +36,15 @@ export function getCompleteHeroVideo() {
   if (!pending) pending = fetchCompleteVideo().catch(error => { pending = undefined; throw error; });
   return pending;
 }
+
+// Retain one complete source across client navigation. The browser releases it
+// with the document; revoking it on a route unmount would break a returning hero.
+export function peekHeroSource() { return cachedUrl; }
+export function prepareHeroSource() {
+  if (!preparing) preparing = getCompleteHeroVideo().then(blob => {
+    cachedUrl = URL.createObjectURL(blob);
+    return cachedUrl;
+  }).catch(error => { preparing = undefined; throw error; });
+  return preparing;
+}
+export function pendingHeroSource() { return preparing; }

@@ -1,4 +1,5 @@
 @import 'tailwindcss';
+@import './navigation.css';
 @import 'tw-animate-css';
 @import 'shadcn/tailwind.css';
 :root{--background:#241914;--foreground:#fff4e5;--primary:#c80b32;--primary-foreground:#fff4e5;--card:#34231c;--card-foreground:#fff4e5;--border:#ffffff24;--ring:#efb55d;--radius:.4rem;--muted:#34231c;--muted-foreground:#cbbbad;--secondary:#fff4e5;--secondary-foreground:#241914;--accent:#c80b32;--accent-foreground:#fff;--popover:#34231c;--popover-foreground:#fff4e5;--input:#ffffff24;--destructive:#c80b32}.dark{--background:#241914;--foreground:#fff4e5;--card:#34231c;--primary:#c80b32}

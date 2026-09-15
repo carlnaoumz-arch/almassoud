@@ -1,0 +1,17 @@
+.information-page{background:#f7eddb;color:#271810;min-height:100vh}
+.information-page .site-header{position:sticky;top:0;background:#211612;color:#fff4e5}
+.information-intro{padding:80px 7% 60px;background:#321f16;color:#fff4e5}
+.information-intro h1{font-size:clamp(60px,9vw,120px)}
+.information-intro>p:last-child{font-size:18px;line-height:1.6}
+.location-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));padding:55px 7%;gap:24px}
+.location-grid article{padding:32px;border:1px solid #27181033;background:#fff8ec}
+.location-grid h2{font-size:38px;margin:24px 0 16px}
+.location-grid p{font-size:16px;line-height:1.5}
+.location-grid .text-link{margin-top:28px;width:fit-content;color:#b20c30;border-color:#b20c30}
+.location-call{display:inline-block;margin-top:22px;font-weight:700;font-size:14px}
+.information-page footer{color:#fff4e5}
+.information-page .footer-brand{display:inline-block}
+.story-copy{max-width:850px;padding:70px 7%;margin:auto}
+.story-copy p{font-size:18px;line-height:1.8}
+@media(max-width:900px){.location-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:600px){.location-grid{grid-template-columns:1fr;padding:35px 6%}.information-intro{padding:55px 6%}.information-intro h1{font-size:60px}}

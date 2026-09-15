@@ -47,3 +47,29 @@ footer{background:var(--char)}
 .menu-list{background:var(--paper)}.menu-category{min-height:650px;display:grid;grid-template-columns:minmax(200px,.84fr) minmax(260px,1fr) minmax(420px,1.4fr);border-bottom:1px solid #4a2c1d44;scroll-margin-top:150px}.menu-category:nth-child(even){background:#2d1e17;color:var(--paper)}.category-heading{padding:60px 15%;display:flex;flex-direction:column;justify-content:space-between;border-right:1px solid currentColor}.category-heading span{font:700 60px/1 Impact,'Arial Narrow',sans-serif;letter-spacing:-.07em;color:var(--fire)}.category-heading p{margin:70px 0 20px;font-size:11px;font-weight:800;letter-spacing:.13em;line-height:1.45}.category-heading h2{margin:0;font-size:clamp(46px,5vw,78px);line-height:.84}.category-photo{min-height:650px;overflow:hidden;background:#d28b37}.category-photo img{width:100%;height:100%;object-fit:cover;object-position:center;display:block;filter:saturate(1.05)}.item-list{padding:48px 12%;display:grid;align-content:center;gap:0}.menu-item{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:22px;padding:18px 0;border-bottom:1px solid currentColor}.menu-item h3{font-size:21px;letter-spacing:-.03em;margin:0 0 7px}.menu-item p{font-size:14px;line-height:1.45;margin:0;color:#705d50}.menu-category:nth-child(even) .menu-item p{color:#ddc8b1}.menu-item strong{font-size:16px;color:var(--fire);white-space:nowrap}.menu-category:nth-child(even) .menu-item strong{color:#f2c26e}.menu-cta{display:flex;justify-content:space-between;align-items:center;gap:40px;padding:90px 7%;background:var(--gold);color:var(--ink)}.menu-cta h2{font-size:clamp(58px,7vw,110px);margin:0}.menu-cta .eyebrow{color:#812032}.menu-cta .button{background:var(--ink);color:var(--paper)}
 @media(max-width:850px){.menu-hero{min-height:510px;padding-top:130px}.category-rail{top:82px}.menu-category{grid-template-columns:.68fr 1fr;min-height:0}.category-heading{padding:42px 12%;min-height:330px}.category-heading p{margin:30px 0}.category-photo{min-height:330px}.item-list{grid-column:1/-1;padding:36px 8%;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:32px}.menu-item{padding:15px 0}}
 @media(max-width:600px){.diner-menu header{height:82px}.diner-menu .menu-home{font-size:12px;gap:4px}.menu-hero{min-height:560px;display:block;padding:130px 7% 56px}.menu-hero h1{font-size:76px}.menu-hero-mark{position:absolute;right:6%;bottom:50px}.menu-hero-mark strong{font-size:100px}.category-rail{top:82px}.category-rail a{padding:15px 18px;font-size:10px}.menu-category{display:grid;grid-template-columns:1fr 1fr}.category-heading{min-height:270px;padding:35px 13%;border-right:1px solid currentColor}.category-heading span{font-size:46px}.category-heading p{font-size:9px;margin:26px 0 13px}.category-heading h2{font-size:45px}.category-photo{min-height:270px}.item-list{display:block;padding:30px 7%}.menu-item{gap:12px}.menu-item h3{font-size:18px}.menu-item p{font-size:13px}.menu-item strong{font-size:14px}.menu-cta{display:block;padding:65px 7%}.menu-cta .button{margin-top:30px;width:100%}}
+
+/* Faded hero links must not remain invisible click or keyboard targets. */
+@media(prefers-reduced-motion:no-preference){.assembly-scene:not([data-phase="grill"]) .copy,.assembly-scene:not([data-phase="grill"]) .hero-bottom{visibility:hidden;pointer-events:none}}
+.dish-entry{scroll-margin-top:130px}
+@media(max-width:700px){
+ .assembly-scene .hero{height:100svh;min-height:0}
+ .assembly-scene .copy{height:100%;padding-top:145px}
+ .assembly-scene .intro{position:absolute;left:5%;bottom:142px;margin:0;font-size:14px;line-height:1.45}
+ .assembly-scene .actions{position:absolute;left:5%;right:5%;bottom:78px}
+ .assembly-scene .actions .button{flex:1;gap:8px;padding:15px 12px;font-size:10px}
+ .assembly-scene .film{top:215px;bottom:195px;left:-40%;right:-10%}
+ .assembly-scene .motion-toggle{bottom:18px;min-height:36px}
+ .assembly-scene .hero-bottom{bottom:24px;right:48%;justify-content:flex-start}
+ .assembly-scene .hero-bottom a{font-size:8px;line-height:1.6;gap:5px}
+ .dish-entry{scroll-margin-top:170px}
+}
+@media(max-width:700px) and (max-height:740px){
+ .assembly-scene .copy{padding-top:128px}
+ .assembly-scene .copy .eyebrow{font-size:8px;margin-bottom:15px}
+ .assembly-scene h1{font-size:clamp(48px,13vw,68px)}
+ .assembly-scene .film{top:215px;bottom:185px}
+ .assembly-scene .ingredient-copy{top:132px}
+ .assembly-scene .ingredient-copy h2{font-size:34px}
+ .assembly-scene .bridge{top:140px}
+ .assembly-scene .bridge h2{font-size:40px}
+}

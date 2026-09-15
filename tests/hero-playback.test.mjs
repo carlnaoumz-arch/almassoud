@@ -28,6 +28,15 @@ class FakeVideo extends EventTarget {
   completeSeek() { this.seeking = false; this.dispatchEvent(new Event('seeked')); }
   becomeReady() { this.duration = 10.042; this.readyState = 3; this.dispatchEvent(new Event('canplay')); }
 }
+class FramedVideo extends FakeVideo {
+  frameCallbacks = new Map(); frameId = 0;
+  requestVideoFrameCallback = callback => { const id = ++this.frameId; this.frameCallbacks.set(id, callback); return id; };
+  cancelVideoFrameCallback = id => this.frameCallbacks.delete(id);
+  present(time = this.currentTime) {
+    const callbacks = [...this.frameCallbacks.values()]; this.frameCallbacks.clear();
+    callbacks.forEach(fn => fn(0, { mediaTime: time }));
+  }
+}
 function setup({ cached = false, reject = false, reduced = false } = {}) {
   const video = new FakeVideo(), clock = new FakeClock(), readiness = [], positions = [];
   if (cached) { video.readyState = 4; video.duration = 10.042; }
@@ -225,4 +234,91 @@ test('permanent decoder failure becomes idle after bounded recovery', () => {
   c.playback.resumeLoading(); c.video.becomeReady(); settle(c);
   assert.ok(c.video.currentTime > 8);
   c.playback.destroy();
+});
+
+test('continuous scroll cannot postpone recovery of a stuck decoder', () => {
+  const c = setup({ cached: true });
+  c.playback.setProgress(.8); c.clock.step();
+  for (let i = 0; i < 85; i++) { c.playback.setProgress(i % 2 ? .7 : .8); c.clock.step(100); }
+  assert.ok(c.video.loadCalls >= 1);
+  c.video.becomeReady(); settle(c);
+  assert.ok(c.video.currentTime > 7);
+  c.playback.destroy();
+});
+
+test('an error while idle keeps monitoring the replacement load', () => {
+  const c = setup({ cached: true }); c.playback.setProgress(.5); settle(c);
+  c.video.error = { code: 2 }; c.video.dispatchEvent(new Event('error'));
+  c.clock.step(800);
+  assert.equal(c.video.loadCalls, 1);
+  assert.ok(c.clock.frames.size + c.clock.timers.size > 0);
+  c.video.readyState = 2; c.video.duration = 10.042; // no readiness event
+  settle(c);
+  assert.ok(c.video.currentTime > 5);
+  c.playback.destroy();
+});
+
+test('five separate transient errors can each recover after successful decoding', () => {
+  const c = setup({ cached: true }); c.playback.setProgress(.5); settle(c);
+  for (let i = 0; i < 5; i++) {
+    c.video.error = { code: 2 }; c.video.dispatchEvent(new Event('error'));
+    c.clock.step(800);
+    assert.equal(c.video.loadCalls, i + 1);
+    c.video.becomeReady(); settle(c);
+  }
+  c.playback.setProgress(.9); settle(c);
+  assert.ok(c.video.currentTime > 9);
+  c.playback.destroy();
+});
+
+test('reported seek position cannot conceal a frozen displayed frame', () => {
+  const video = new FakeVideo(), clock = new FakeClock(), callbacks = new Map();
+  let id = 0;
+  video.readyState = 4; video.duration = 10.042;
+  video.requestVideoFrameCallback = fn => { callbacks.set(++id, fn); return id; };
+  video.cancelVideoFrameCallback = key => callbacks.delete(key);
+  const playback = createHeroPlayback(video, { onReady() {}, onProgress() {} }, { clock });
+  playback.setProgress(.7);
+  for (let i = 0; i < 80; i++) {
+    clock.step(100);
+    if (video.seeking) video.completeSeek(); // position says success; no displayed frame arrives
+  }
+  assert.equal(video.loadCalls, 1);
+  playback.setActive(false);
+  const loads = video.loadCalls;
+  for (let i = 0; i < 100; i++) clock.step(100);
+  assert.equal(video.loadCalls, loads, 'offscreen media must not trigger false stall recovery');
+  assert.equal(callbacks.size, 0);
+  playback.setActive(true);
+  assert.equal(callbacks.size, 1);
+  playback.destroy();
+  assert.equal(callbacks.size, 0);
+});
+
+test('a new scroll after healthy idle time gets a fresh decode deadline', () => {
+  const video = new FramedVideo(), clock = new FakeClock(); let stalls = 0;
+  video.readyState = 4; video.duration = 10.042;
+  const playback = createHeroPlayback(video, { onReady() {}, onProgress() {}, onStall() { stalls++; } }, { clock });
+  playback.setProgress(.5);
+  for (let i = 0; i < 100; i++) { clock.step(); video.completeSeek(); video.present(); }
+  clock.step(15000);
+  playback.setProgress(.8); clock.step();
+  assert.equal(stalls, 0);
+  assert.equal(video.loadCalls, 0);
+  playback.destroy();
+});
+
+test('a reload first frame cannot conceal repeated frozen scroll seeks', () => {
+  const video = new FramedVideo(), clock = new FakeClock();
+  video.readyState = 4; video.duration = 10.042;
+  const playback = createHeroPlayback(video, { onReady() {}, onProgress() {} }, { clock });
+  playback.setProgress(.8); let loads = 0;
+  for (let i = 0; i < 600; i++) {
+    clock.step(100);
+    if (video.loadCalls > loads) { loads = video.loadCalls; video.becomeReady(); video.present(0); }
+    if (video.seeking) video.completeSeek();
+  }
+  assert.equal(video.loadCalls, 2);
+  assert.equal(clock.frames.size + clock.timers.size, 0);
+  playback.destroy();
 });

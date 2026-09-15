@@ -9,7 +9,8 @@ export interface PlaybackClock {
 
 type Video = Pick<HTMLVideoElement,
   'readyState' | 'duration' | 'currentTime' | 'seeking' | 'muted' | 'defaultMuted' |
-  'playsInline' | 'paused' | 'play' | 'pause' | 'load' | 'error' | 'addEventListener' | 'removeEventListener'>;
+  'playsInline' | 'paused' | 'play' | 'pause' | 'load' | 'error' | 'addEventListener' | 'removeEventListener'> &
+  Partial<Pick<HTMLVideoElement, 'requestVideoFrameCallback' | 'cancelVideoFrameCallback'>>;
 
 const browserClock: PlaybackClock = {
   now: () => performance.now(),
@@ -21,7 +22,7 @@ const browserClock: PlaybackClock = {
 
 export function createHeroPlayback(
   video: Video,
-  callbacks: { onReady(ready: boolean): void; onProgress(progress: number): void; onStall?(): void },
+  callbacks: { onReady(ready: boolean): void; onProgress(progress: number): void; onStall?(): void; onFrame?(time: number): void },
   options: { reducedMotion?: boolean; clock?: PlaybackClock } = {},
 ) {
   const clock = options.clock ?? browserClock;
@@ -31,6 +32,8 @@ export function createHeroPlayback(
   let target = 0, eased = 0, frame = 0, retry = 0, retryCount = 0, wake = 0;
   let lastTime = clock.now(), playVersion = 0;
   let lastAdvance = clock.now(), lastMediaTime = video.currentTime, stalled = false;
+  let renderedTime = -1, videoFrame = 0;
+  const observesFrames = typeof video.requestVideoFrameCallback === 'function';
   const listeners: Array<[string, EventListener]> = [];
   const blocked = () => destroyed || paused || reduced || !active || failed;
   const validDuration = () => Number.isFinite(video.duration) && video.duration > 0;
@@ -51,6 +54,32 @@ export function createHeroPlayback(
     if (retry) clock.cancelDelay(retry);
     frame = wake = retry = 0;
   }
+  function confirmDecode(reachedRequest = true) {
+    lastAdvance = clock.now();
+    lastMediaTime = video.currentTime;
+    stalled = false;
+    if (reachedRequest) {
+      retryCount = 0; // Reset only once the requested motion has recovered.
+      if (retry) { clock.cancelDelay(retry); retry = 0; }
+    }
+  }
+  function watchFrames() {
+    if (!observesFrames || videoFrame || blocked()) return;
+    videoFrame = video.requestVideoFrameCallback!((_now, metadata) => {
+      videoFrame = 0;
+      if (destroyed) return;
+      if (Math.abs(metadata.mediaTime - renderedTime) > .001) {
+        confirmDecode(intro || (validDuration() && Math.abs(metadata.mediaTime - timeAt(eased)) < .085));
+      }
+      renderedTime = metadata.mediaTime;
+      callbacks.onFrame?.(renderedTime);
+      watchFrames();
+    });
+  }
+  function cancelVideoFrame() {
+    if (videoFrame) video.cancelVideoFrameCallback?.(videoFrame);
+    videoFrame = 0;
+  }
   function resetWatchdog() {
     lastTime = lastAdvance = clock.now();
     lastMediaTime = video.currentTime;
@@ -58,10 +87,7 @@ export function createHeroPlayback(
   }
   function checkStall() {
     const time = clock.now();
-    if (!video.seeking && video.readyState >= 2 && Math.abs(video.currentTime - lastMediaTime) > .01) {
-      lastMediaTime = video.currentTime;
-      lastAdvance = time;
-    }
+    if (!observesFrames && !video.seeking && video.readyState >= 2 && Math.abs(video.currentTime - lastMediaTime) > .01) confirmDecode();
     if (time - lastAdvance > 3000 && !stalled) {
       stalled = true;
       callbacks.onStall?.();
@@ -103,10 +129,11 @@ export function createHeroPlayback(
       try { video.currentTime = timeAt(eased); } catch { waitForDecoder(); }
     }
     if (Math.abs(target - eased) >= .0005) schedule();
-    if (video.seeking || Math.abs(video.currentTime - timeAt(eased)) > 1 / 48) {
+    const waitingForFrame = observesFrames && Math.abs(renderedTime - timeAt(eased)) > .085;
+    if (video.seeking || waitingForFrame || Math.abs(video.currentTime - timeAt(eased)) > 1 / 48) {
       checkStall();
       waitForDecoder();
-    } else resetWatchdog();
+    } else lastAdvance = clock.now();
   }
   function playIntro() {
     if (!intro || blocked() || !ready || playPending || !video.paused) return;
@@ -134,6 +161,7 @@ export function createHeroPlayback(
       if (!ready) { ready = true; callbacks.onReady(true); }
       if (retry && !stalled && !video.error) { clock.cancelDelay(retry); retry = 0; }
       if (intro) playIntro();
+      watchFrames();
       schedule();
     }
   }
@@ -154,8 +182,14 @@ export function createHeroPlayback(
       ready = false;
       callbacks.onReady(false);
       resetWatchdog();
+      cancelVideoFrame();
+      renderedTime = -1;
       video.load();
+      watchFrames();
       refresh();
+      // load() can be silent; keep observing until it decodes or retries finish.
+      schedule();
+      waitForDecoder();
     }, 750 * (retryCount + 1));
   }
   function on(name: string, callback: () => void) {
@@ -168,35 +202,44 @@ export function createHeroPlayback(
   video.playsInline = true;
   ['loadedmetadata', 'loadeddata', 'canplay', 'canplaythrough', 'progress'].forEach(name => on(name, refresh));
   ['waiting', 'stalled', 'pause'].forEach(name => on(name, () => { schedule(); waitForDecoder(); }));
-  on('seeked', () => { refresh(); schedule(); });
+  on('seeked', () => {
+    if (!observesFrames && video.readyState >= 2) confirmDecode();
+    refresh(); schedule();
+  });
   on('timeupdate', () => { if (intro && validDuration() && video.currentTime >= introEnd()) schedule(); });
   on('error', recover);
   on('ended', () => { intro = false; stopPlayback(); });
   if (reduced) video.pause();
   refresh();
+  watchFrames();
 
   return {
     setProgress(value: number) {
       const clamped = Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0;
       const next = clamped < .0005 ? 0 : clamped;
+      const settled = !intro && ready && !video.seeking && validDuration()
+        && Math.abs(target - eased) < .0005
+        && Math.abs((observesFrames ? renderedTime : video.currentTime) - timeAt(target)) < .085;
+      // Idle time is not decoder delay. Start the deadline once when new work begins.
+      if (settled && Math.abs(next - target) > .0005) resetWatchdog();
       if (intro && next > 0) { intro = false; stopPlayback(); }
-      if (Math.abs(next - target) > .001) resetWatchdog();
+      // User input must not reset the decoder's no-progress deadline.
       target = next;
       refresh();
       schedule();
     },
     setPaused(value: boolean) {
       paused = value;
-      if (value) { stopPlayback(); stopWork(); } else { resetWatchdog(); refresh(); schedule(); }
+      if (value) { stopPlayback(); stopWork(); cancelVideoFrame(); } else { resetWatchdog(); watchFrames(); refresh(); schedule(); }
     },
     setReducedMotion(value: boolean) {
       reduced = value;
-      if (value) { stopPlayback(); stopWork(); callbacks.onProgress(0); }
-      else { resetWatchdog(); refresh(); schedule(); }
+      if (value) { stopPlayback(); stopWork(); cancelVideoFrame(); callbacks.onProgress(0); }
+      else { resetWatchdog(); watchFrames(); refresh(); schedule(); }
     },
     setActive(value: boolean) {
       active = value;
-      if (!value) { stopPlayback(); stopWork(); } else { resetWatchdog(); refresh(); schedule(); }
+      if (!value) { stopPlayback(); stopWork(); cancelVideoFrame(); } else { resetWatchdog(); watchFrames(); refresh(); schedule(); }
     },
     refresh,
     resumeLoading() {
@@ -212,13 +255,17 @@ export function createHeroPlayback(
       retryCount = 0;
       ready = false;
       resetWatchdog();
+      cancelVideoFrame();
+      renderedTime = -1;
       video.load();
+      watchFrames();
       refresh();
       schedule();
     },
     destroy() {
       destroyed = true;
       stopPlayback();
+      cancelVideoFrame();
       if (frame) clock.cancelFrame(frame);
       if (wake) clock.cancelDelay(wake);
       if (retry) clock.cancelDelay(retry);

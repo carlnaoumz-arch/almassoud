@@ -14,7 +14,7 @@ export function useHeroPlayback() {
     const element = scene.current, film = video.current;
     if (!element || !film) return;
     const media = window.matchMedia('(prefers-reduced-motion: reduce)');
-    let disposed = false, frame = 0;
+    let disposed = false, frame = 0, active: boolean | undefined;
     const cached = peekHeroSource();
     if (cached && film.src !== cached) { film.src = cached; film.load(); }
     const useCompleteSource = (source: Promise<string | undefined>) => {
@@ -31,26 +31,34 @@ export function useHeroPlayback() {
         element.dataset.phase = progress < .25 ? 'grill' : progress < .68 ? 'ingredients' : 'platter';
       },
       onStall: () => useCompleteSource(prepareHeroSource()),
+      onFrame: time => { element.dataset.frameTime = time.toFixed(3); },
     }, { reducedMotion: media.matches });
     controller.current = playback;
     const pending = pendingHeroSource();
     if (!cached) useCompleteSource(pending ?? restoreHeroSource());
+    const updateActivity = () => {
+      const bounds = film.getBoundingClientRect();
+      const next = !document.hidden && bounds.bottom > 0 && bounds.top < window.innerHeight;
+      if (next !== active) { active = next; playback.setActive(next); }
+    };
     const measure = () => {
       frame = 0;
+      updateActivity();
       const stickyHeight = element.firstElementChild?.getBoundingClientRect().height ?? window.innerHeight;
       const distance = Math.max(1, element.offsetHeight - stickyHeight);
       playback.setProgress(-element.getBoundingClientRect().top / distance);
     };
     const scroll = () => { if (!frame) frame = requestAnimationFrame(measure); };
-    const visibility = () => { playback.setActive(!document.hidden); if (!document.hidden) measure(); };
+    const visibility = () => { updateActivity(); if (!document.hidden) measure(); };
     const preference = () => playback.setReducedMotion(media.matches);
     const restore = () => {
-      playback.setActive(!document.hidden);
+      active = undefined;
+      updateActivity();
       playback.resumeLoading();
       measure();
       scroll(); // History scroll restoration can happen after pageshow.
     };
-    const suspend = () => playback.setActive(false);
+    const suspend = () => { active = false; playback.setActive(false); };
     window.addEventListener('scroll', scroll, { passive: true });
     window.addEventListener('resize', scroll);
     window.addEventListener('pageshow', restore);
@@ -59,7 +67,6 @@ export function useHeroPlayback() {
     document.addEventListener('visibilitychange', visibility);
     media.addEventListener('change', preference);
     // Initialize even at the top and after restored-scroll navigation.
-    playback.setActive(!document.hidden);
     measure();
     scroll();
     return () => {

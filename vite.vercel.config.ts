@@ -6,5 +6,8 @@ import { defineConfig } from 'vite';
 // Vercel needs its own server functions and routing manifest, rather than the
 // Cloudflare Worker emitted by the original hosting configuration.
 export default defineConfig({
-  plugins: [tailwindcss(), vinext(), nitro({ preset: 'vercel' })],
+  plugins: [tailwindcss(), vinext(), nitro({
+    preset: 'vercel',
+    routeRules: { '/hero-mobile-v2/**': { headers: { 'cache-control': 'public, max-age=31536000, immutable' } } },
+  })],
 });

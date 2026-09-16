@@ -34,6 +34,26 @@ test('phone motion reaches both ends and reverses without any video API', async 
   c.controller.setProgress(.25); await settle(c); assert.equal(c.drawn.at(-1), 53);
   c.controller.destroy(); assert.ok(c.assets.every(x => x.closed));
 });
+test('eight frames share one decode and completed images paint only on animation frames', async () => {
+  const c = setup(); await flush(); assert.equal(c.drawn.length, 0);
+  await settle(c); const loaded = c.assets.length;
+  c.controller.setProgress(6 / 210); await settle(c);
+  assert.equal(c.drawn.at(-1), 6); assert.equal(c.assets.length, loaded);
+  c.controller.setProgress(2 / 210); await settle(c);
+  assert.equal(c.drawn.at(-1), 2); assert.equal(c.assets.length, loaded);
+  c.controller.destroy();
+});
+test('fast swipes cancel obsolete requests and request the destination before they finish', async () => {
+  const jobs = [], clock = new Clock();
+  const controller = createHeroFrames((index, signal) => new Promise(resolve => jobs.push({index, signal, resolve})),
+    { draw() {}, onProgress() {} }, {clock});
+  controller.setProgress(1);
+  for (let i=0; i<70; i++) clock.step();
+  assert.ok(jobs.some(j => j.index === 26 && !j.signal.aborted));
+  assert.ok(jobs[0].signal.aborted);
+  assert.ok(jobs.filter(j => !j.signal.aborted).length <= 2);
+  controller.destroy(); jobs.forEach(j => j.resolve({close(){}})); await flush();
+});
 test('pause and offscreen suspension preserve latest progress and bound decoded memory', async () => {
   const c = setup(); c.controller.setProgress(.3); await settle(c);
   c.controller.setPaused(true); const count = c.drawn.length;
@@ -41,23 +61,23 @@ test('pause and offscreen suspension preserve latest progress and bound decoded 
   c.controller.setPaused(false); await settle(c); assert.equal(c.drawn.at(-1), 168);
   c.controller.setActive(false); c.controller.setProgress(.1); await settle(c); assert.equal(c.drawn.at(-1), 168);
   c.controller.setActive(true); await settle(c); assert.equal(c.drawn.at(-1), 21);
-  assert.ok(c.maximumLive() <= 11); c.controller.destroy();
+  assert.ok(c.maximumLive() <= 5); c.controller.destroy();
 });
 test('late old-page downloads are closed and cannot paint a replacement page', async () => {
   const pending = [], draws = [], clock = new Clock();
   const controller = createHeroFrames((index, signal) => new Promise(resolve => pending.push({ resolve, signal })),
     { draw: () => draws.push(true), onProgress() {} }, { clock });
-  assert.equal(pending.length, 3); controller.destroy();
+  assert.equal(pending.length, 2); controller.destroy();
   let closed = 0;
   pending.forEach(job => { assert.equal(job.signal.aborted, true); job.resolve({ close: () => closed++ }); });
-  await flush(); assert.equal(closed, 3); assert.equal(draws.length, 0);
+  await flush(); assert.equal(closed, 2); assert.equal(draws.length, 0);
 });
 test('initial scroll while images load catches up without another gesture', async () => {
   const clock = new Clock(), pending = [], draws = [];
   const controller = createHeroFrames(index => new Promise(resolve => pending.push({ index, resolve })),
     { draw: (asset, index) => draws.push(index), onProgress() {} }, { clock });
   controller.setProgress(.9); for (let i = 0; i < 70; i++) clock.step();
-  for (let i = 0; i < 10; i++) { pending.splice(0).forEach(job => job.resolve({ close() {} })); await flush(); }
+  for (let i = 0; i < 10; i++) { pending.splice(0).forEach(job => job.resolve({ close() {} })); await flush(); clock.step(); }
   assert.equal(draws.at(-1), 189); controller.destroy();
 });
 test('reduced motion defaults to still; explicit play can enable scrolling', async () => {

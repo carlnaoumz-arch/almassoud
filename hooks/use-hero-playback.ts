@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createHeroPlayback } from '../lib/hero-playback';
 import { peekHeroSource, pendingHeroSource, prepareHeroSource, restoreHeroSource } from '../lib/hero-source';
-import { createHeroFrames, loadHeroFrame, phoneHeroQuery } from '../lib/hero-frames';
+import { createHeroFrames, loadHeroFrame, phoneHeroQuery, preloadHeroSheets, HERO_FRAME_WIDTH, HERO_FRAME_HEIGHT } from '../lib/hero-frames';
 
 export function useHeroPlayback() {
   const scene = useRef<HTMLElement>(null);
@@ -24,8 +24,11 @@ export function useHeroPlayback() {
     const surface = canvas.current;
     const context = phone ? surface?.getContext('2d', { alpha: false }) : null;
     const frames = Boolean(phone && surface && context);
+    if (frames) { surface!.width = HERO_FRAME_WIDTH; surface!.height = HERO_FRAME_HEIGHT; }
     element.dataset.renderer = frames ? 'frames' : 'video';
     let disposed = false, frame = 0, active: boolean | undefined;
+    let painted = false, warmup = 0, geometryDirty = true, sceneTop = 0, sceneHeight = 0, scrollDistance = 1;
+    const warmupAbort = new AbortController();
     const cached = frames ? undefined : peekHeroSource();
     if (cached && film.src !== cached) { film.src = cached; film.load(); }
     const useCompleteSource = (source: Promise<string | undefined>) => {
@@ -42,9 +45,14 @@ export function useHeroPlayback() {
     const playback = frames ? createHeroFrames(loadHeroFrame, {
       onProgress,
       draw: (asset, index) => {
-        context!.drawImage(asset.image, 0, 0, 1920, 1080);
+        const cell = index % 8;
+        context!.drawImage(asset.image, (cell % 2) * HERO_FRAME_WIDTH, Math.floor(cell / 2) * HERO_FRAME_HEIGHT,
+          HERO_FRAME_WIDTH, HERO_FRAME_HEIGHT, 0, 0, HERO_FRAME_WIDTH, HERO_FRAME_HEIGHT);
         element.dataset.frameTime = ((29 + index) / 24).toFixed(3);
-        setReady(true);
+        if (!painted) {
+          painted = true; setReady(true);
+          warmup = window.setTimeout(() => { void preloadHeroSheets(warmupAbort.signal); }, 400);
+        }
       },
     }, { reducedMotion: media.matches }) : createHeroPlayback(film, {
       onReady: setReady,
@@ -61,28 +69,40 @@ export function useHeroPlayback() {
       if (!cached) useCompleteSource(pending ?? restoreHeroSource());
     }
     const updateActivity = () => {
-      const bounds = (frames ? surface! : film).getBoundingClientRect();
+      const bounds = frames
+        ? { top: sceneTop - window.scrollY, bottom: sceneTop + sceneHeight - window.scrollY }
+        : film.getBoundingClientRect();
       const next = !document.hidden && bounds.bottom > 0 && bounds.top < window.innerHeight;
       if (next !== active) { active = next; playback.setActive(next); }
     };
     const measure = () => {
       frame = 0;
+      if (frames && geometryDirty) {
+        sceneTop = element.getBoundingClientRect().top + window.scrollY;
+        sceneHeight = element.offsetHeight;
+        scrollDistance = Math.max(1, sceneHeight - (element.firstElementChild?.getBoundingClientRect().height ?? window.innerHeight));
+        geometryDirty = false;
+      }
       updateActivity();
+      if (frames) { playback.setProgress((window.scrollY - sceneTop) / scrollDistance); return; }
       const stickyHeight = element.firstElementChild?.getBoundingClientRect().height ?? window.innerHeight;
       const distance = Math.max(1, element.offsetHeight - stickyHeight);
       playback.setProgress(-element.getBoundingClientRect().top / distance);
     };
     const scroll = () => { if (!frame) frame = requestAnimationFrame(measure); };
+    const resize = () => { geometryDirty = true; scroll(); };
     const visibility = () => { updateActivity(); if (!document.hidden) measure(); };
     const preference = () => {
       reducedPreference.current = media.matches;
       setReduced(media.matches);
       delete element.dataset.motionOverride;
       playback.setReducedMotion(media.matches);
+      geometryDirty = true;
       measure();
     };
     const restore = () => {
       active = undefined;
+      geometryDirty = true;
       updateActivity();
       playback.resumeLoading();
       measure();
@@ -90,7 +110,7 @@ export function useHeroPlayback() {
     };
     const suspend = () => { active = false; playback.setActive(false); };
     window.addEventListener('scroll', scroll, { passive: true });
-    window.addEventListener('resize', scroll);
+    window.addEventListener('resize', resize);
     window.addEventListener('pageshow', restore);
     window.addEventListener('pagehide', suspend);
     window.addEventListener('online', restore);
@@ -102,10 +122,11 @@ export function useHeroPlayback() {
     return () => {
       disposed = true;
       playback.destroy();
+      clearTimeout(warmup); warmupAbort.abort();
       controller.current = null;
       cancelAnimationFrame(frame);
       window.removeEventListener('scroll', scroll);
-      window.removeEventListener('resize', scroll);
+      window.removeEventListener('resize', resize);
       window.removeEventListener('pageshow', restore);
       window.removeEventListener('pagehide', suspend);
       window.removeEventListener('online', restore);

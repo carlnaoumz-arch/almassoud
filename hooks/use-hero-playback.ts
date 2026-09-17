@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import { createHeroPlayback } from '../lib/hero-playback';
+import { createHeroAutoplay } from '../lib/hero-autoplay';
 import { peekHeroSource, pendingHeroSource, prepareHeroSource, restoreHeroSource } from '../lib/hero-source';
 import { createHeroFrames, loadHeroFrame, phoneHeroQuery, preloadHeroSheets, HERO_FRAME_WIDTH, HERO_FRAME_HEIGHT } from '../lib/hero-frames';
 
@@ -8,18 +9,11 @@ export function useHeroPlayback() {
   const scene = useRef<HTMLElement>(null);
   const video = useRef<HTMLVideoElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
-  const controller = useRef<ReturnType<typeof createHeroPlayback> | ReturnType<typeof createHeroFrames> | null>(null);
   const [ready, setReady] = useState(false);
-  const [paused, setPaused] = useState(false);
-  const [reduced, setReduced] = useState(false);
-  const reducedPreference = useRef(false);
 
   useEffect(() => {
     const element = scene.current, film = video.current;
     if (!element || !film) return;
-    const media = window.matchMedia('(prefers-reduced-motion: reduce)');
-    reducedPreference.current = media.matches;
-    setReduced(media.matches);
     const phone = window.matchMedia(phoneHeroQuery).matches;
     const surface = canvas.current;
     const context = phone ? surface?.getContext('2d', { alpha: false }) : null;
@@ -38,7 +32,12 @@ export function useHeroPlayback() {
         if ('sourceChanged' in playback && typeof playback.sourceChanged === 'function') playback.sourceChanged();
       }).catch(() => { /* Keep streaming and allow the controller to recover. */ });
     };
-    const onProgress = (progress: number) => {
+    let scrollProgress = 0, mediaReady = false;
+    let autoplay: ReturnType<typeof createHeroAutoplay> | undefined;
+    const onReady = (value: boolean) => { mediaReady = value; setReady(value); autoplay?.setReady(value); };
+    const onProgress = (motionProgress: number) => {
+        // Keep the opening headline and order links visible during automatic playback.
+        const progress = scrollProgress === 0 ? 0 : motionProgress;
         element.style.setProperty('--progress', String(progress));
         element.dataset.phase = progress < .25 ? 'grill' : progress < .68 ? 'ingredients' : 'platter';
     };
@@ -50,17 +49,18 @@ export function useHeroPlayback() {
           HERO_FRAME_WIDTH, HERO_FRAME_HEIGHT, 0, 0, HERO_FRAME_WIDTH, HERO_FRAME_HEIGHT);
         element.dataset.frameTime = ((29 + index) / 24).toFixed(3);
         if (!painted) {
-          painted = true; setReady(true);
+          painted = true; onReady(true);
           warmup = window.setTimeout(() => { void preloadHeroSheets(warmupAbort.signal); }, 400);
         }
       },
-    }, { reducedMotion: media.matches }) : createHeroPlayback(film, {
-      onReady: setReady,
+    }) : createHeroPlayback(film, {
+      onReady,
       onProgress,
       onStall: () => useCompleteSource(prepareHeroSource()),
       onFrame: time => { element.dataset.frameTime = time.toFixed(3); },
-    }, { reducedMotion: media.matches });
-    controller.current = playback;
+    });
+    autoplay = createHeroAutoplay(progress => playback.setProgress(progress));
+    autoplay.setReady(mediaReady);
     if (frames) { film.pause(); }
     else {
       // If a desktop window selected no initial source, start its normal video now.
@@ -73,7 +73,7 @@ export function useHeroPlayback() {
         ? { top: sceneTop - window.scrollY, bottom: sceneTop + sceneHeight - window.scrollY }
         : film.getBoundingClientRect();
       const next = !document.hidden && bounds.bottom > 0 && bounds.top < window.innerHeight;
-      if (next !== active) { active = next; playback.setActive(next); }
+      if (next !== active) { active = next; playback.setActive(next); autoplay?.setActive(next); }
     };
     const measure = () => {
       frame = 0;
@@ -84,22 +84,15 @@ export function useHeroPlayback() {
         geometryDirty = false;
       }
       updateActivity();
-      if (frames) { playback.setProgress((window.scrollY - sceneTop) / scrollDistance); return; }
+      if (frames) { scrollProgress = Math.max(0, (window.scrollY - sceneTop) / scrollDistance); autoplay!.setScrollProgress(scrollProgress); return; }
       const stickyHeight = element.firstElementChild?.getBoundingClientRect().height ?? window.innerHeight;
       const distance = Math.max(1, element.offsetHeight - stickyHeight);
-      playback.setProgress(-element.getBoundingClientRect().top / distance);
+      scrollProgress = Math.max(0, -element.getBoundingClientRect().top / distance);
+      autoplay!.setScrollProgress(scrollProgress);
     };
     const scroll = () => { if (!frame) frame = requestAnimationFrame(measure); };
     const resize = () => { geometryDirty = true; scroll(); };
     const visibility = () => { updateActivity(); if (!document.hidden) measure(); };
-    const preference = () => {
-      reducedPreference.current = media.matches;
-      setReduced(media.matches);
-      delete element.dataset.motionOverride;
-      playback.setReducedMotion(media.matches);
-      geometryDirty = true;
-      measure();
-    };
     const restore = () => {
       active = undefined;
       geometryDirty = true;
@@ -108,22 +101,21 @@ export function useHeroPlayback() {
       measure();
       scroll(); // History scroll restoration can happen after pageshow.
     };
-    const suspend = () => { active = false; playback.setActive(false); };
+    const suspend = () => { active = false; autoplay?.setActive(false); playback.setActive(false); };
     window.addEventListener('scroll', scroll, { passive: true });
     window.addEventListener('resize', resize);
     window.addEventListener('pageshow', restore);
     window.addEventListener('pagehide', suspend);
     window.addEventListener('online', restore);
     document.addEventListener('visibilitychange', visibility);
-    media.addEventListener('change', preference);
     // Initialize even at the top and after restored-scroll navigation.
     measure();
     scroll();
     return () => {
       disposed = true;
+      autoplay?.destroy();
       playback.destroy();
       clearTimeout(warmup); warmupAbort.abort();
-      controller.current = null;
       cancelAnimationFrame(frame);
       window.removeEventListener('scroll', scroll);
       window.removeEventListener('resize', resize);
@@ -131,22 +123,8 @@ export function useHeroPlayback() {
       window.removeEventListener('pagehide', suspend);
       window.removeEventListener('online', restore);
       document.removeEventListener('visibilitychange', visibility);
-      media.removeEventListener('change', preference);
     };
   }, []);
 
-  function toggleMotion() {
-    if (reducedPreference.current) {
-      reducedPreference.current = false;
-      setReduced(false);
-      if (scene.current) scene.current.dataset.motionOverride = 'true';
-      controller.current?.setReducedMotion(false);
-      window.dispatchEvent(new Event('resize'));
-      return;
-    }
-    const next = !paused;
-    setPaused(next);
-    controller.current?.setPaused(next);
-  }
-  return { scene, video, canvas, ready, paused, reduced, toggleMotion };
+  return { scene, video, canvas, ready };
 }

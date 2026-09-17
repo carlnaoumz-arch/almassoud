@@ -23,12 +23,12 @@ const browserClock: PlaybackClock = {
 export function createHeroPlayback(
   video: Video,
   callbacks: { onReady(ready: boolean): void; onProgress(progress: number): void; onStall?(): void; onFrame?(time: number): void },
-  options: { reducedMotion?: boolean; clock?: PlaybackClock } = {},
+  options: { reducedMotion?: boolean; clock?: PlaybackClock; intro?: boolean } = {},
 ) {
   const clock = options.clock ?? browserClock;
   let destroyed = false, paused = false, active = true, failed = false;
   let reduced = options.reducedMotion ?? false;
-  let ready = false, intro = true, playPending = false;
+  let ready = false, intro = options.intro ?? true, playPending = false;
   let target = 0, eased = 0, frame = 0, retry = 0, retryCount = 0, wake = 0;
   let lastTime = clock.now(), playVersion = 0;
   let lastAdvance = clock.now(), lastMediaTime = video.currentTime, stalled = false;

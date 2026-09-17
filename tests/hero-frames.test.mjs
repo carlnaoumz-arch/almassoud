@@ -43,16 +43,25 @@ test('eight frames share one decode and completed images paint only on animation
   assert.equal(c.drawn.at(-1), 2); assert.equal(c.assets.length, loaded);
   c.controller.destroy();
 });
-test('fast swipes cancel obsolete requests and request the destination before they finish', async () => {
-  const jobs = [], clock = new Clock();
-  const controller = createHeroFrames((index, signal) => new Promise(resolve => jobs.push({index, signal, resolve})),
-    { draw() {}, onProgress() {} }, {clock});
+test('rapid swipes never start more than two decodes, even when cancellation is slow', async () => {
+  const jobs = [], clock = new Clock(); let live = 0, peak = 0, closed = 0;
+  const controller = createHeroFrames((index, signal) => new Promise(resolve => {
+    live++; peak = Math.max(peak, live);
+    jobs.push({index, signal, resolve: () => { live--; resolve({close(){closed++;}}); }});
+  }), { draw() {}, onProgress() {} }, {clock});
   controller.setProgress(1);
   for (let i=0; i<70; i++) clock.step();
+  assert.equal(jobs.length, 2); // Aborting cannot cancel an already-running native decode.
+  assert.ok(jobs.every(j => j.signal.aborted));
+  jobs.slice(0, 2).forEach(j => j.resolve()); await flush();
   assert.ok(jobs.some(j => j.index === 26 && !j.signal.aborted));
-  assert.ok(jobs[0].signal.aborted);
-  assert.ok(jobs.filter(j => !j.signal.aborted).length <= 2);
-  controller.destroy(); jobs.forEach(j => j.resolve({close(){}})); await flush();
+  assert.equal(closed, 2); assert.ok(peak <= 2);
+  controller.destroy(); jobs.slice(2).forEach(j => j.resolve()); await flush();
+});
+test('first frame stays still at the top, with no looping work once ready', async () => {
+  const c = setup(); await settle(c); const count = c.drawn.length;
+  await settle(c); assert.equal(c.drawn.length, count); assert.equal(c.drawn.at(-1), 0);
+  assert.equal(c.clock.frames.size, 0); c.controller.destroy();
 });
 test('pause and offscreen suspension preserve latest progress and bound decoded memory', async () => {
   const c = setup(); c.controller.setProgress(.3); await settle(c);
@@ -93,4 +102,20 @@ test('unavailable images have bounded retries and do not loop forever', async ()
   const controller = createHeroFrames(async i => { attempts.set(i, (attempts.get(i) ?? 0) + 1); throw new Error('network'); }, { draw() {}, onProgress() {} }, { clock });
   for (let i = 0; i < 30; i++) { clock.step(); await flush(); }
   assert.ok([...attempts.values()].every(n => n === 2)); assert.equal(clock.frames.size, 0); controller.destroy();
+});
+
+test('reversed scroll shares an unfinished download even if its first decode is cancelled', async t => {
+  let requests = 0, complete;
+  t.mock.method(globalThis, 'fetch', () => { requests++; return new Promise(resolve => {complete=resolve;}); });
+  const previous=globalThis.createImageBitmap;
+  globalThis.createImageBitmap=async()=>({close(){}});
+  try {
+    const abort = new AbortController();
+    const first=loadHeroFrame(25,abort.signal).then(()=> 'decoded',error=>error.name);
+    const second=loadHeroFrame(25,new AbortController().signal);
+    abort.abort();
+    complete(new Response(new Uint8Array([1])));
+    assert.equal(await first,'AbortError');
+    (await second).close(); assert.equal(requests,1);
+  } finally { if(previous)globalThis.createImageBitmap=previous;else delete globalThis.createImageBitmap; }
 });

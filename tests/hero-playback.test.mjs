@@ -37,11 +37,11 @@ class FramedVideo extends FakeVideo {
     callbacks.forEach(fn => fn(0, { mediaTime: time }));
   }
 }
-function setup({ cached = false, reject = false, reduced = false } = {}) {
+function setup({ cached = false, reject = false, reduced = false, intro = true } = {}) {
   const video = new FakeVideo(), clock = new FakeClock(), readiness = [], positions = [];
   if (cached) { video.readyState = 4; video.duration = 10.042; }
   video.rejectPlay = reject;
-  const playback = createHeroPlayback(video, { onReady: value => readiness.push(value), onProgress: p => positions.push(p) }, { clock, reducedMotion: reduced });
+  const playback = createHeroPlayback(video, { onReady: value => readiness.push(value), onProgress: p => positions.push(p) }, { clock, reducedMotion: reduced, intro });
   return { video, clock, readiness, positions, playback };
 }
 function settle(ctx, count = 100) {
@@ -321,4 +321,13 @@ test('a reload first frame cannot conceal repeated frozen scroll seeks', () => {
   assert.equal(video.loadCalls, 2);
   assert.equal(clock.frames.size + clock.timers.size, 0);
   playback.destroy();
+});
+
+test('scroll-only mode remains still without playing and follows input immediately', () => {
+  const c = setup({cached:true,intro:false}); settle(c);
+  const first=c.video.currentTime; assert.equal(c.video.playCalls,0);
+  settle(c); assert.equal(c.video.currentTime,first);
+  c.playback.setProgress(.75); settle(c);
+  assert.ok(c.video.currentTime>7); assert.equal(c.video.playCalls,0);
+  c.playback.destroy();
 });

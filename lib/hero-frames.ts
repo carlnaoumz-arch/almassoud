@@ -10,8 +10,8 @@ export const phoneHeroQuery = '(pointer: coarse), (max-width: 900px)';
 const sheetFor = (frame: number) => Math.floor(frame / HERO_FRAMES_PER_SHEET);
 const browserClock: PlaybackClock = {
   now: () => performance.now(), requestFrame: fn => requestAnimationFrame(fn),
-  cancelFrame: id => cancelAnimationFrame(id), delay: (fn, ms) => window.setTimeout(fn, ms),
-  cancelDelay: id => window.clearTimeout(id),
+  cancelFrame: id => cancelAnimationFrame(id), delay: (fn, ms) => globalThis.setTimeout(fn, ms) as unknown as number,
+  cancelDelay: id => globalThis.clearTimeout(id),
 };
 
 /** Eight original frames per image: scrolling within a sheet needs no fetch or decode. */
@@ -42,7 +42,7 @@ export function createHeroFrames<T extends { close(): void }>(
         nearest = candidate; selected = asset; distance = Math.abs(candidate - index);
       }
     }
-    if (selected && nearest !== drawn) { drawn = nearest; callbacks.draw(selected, nearest); }
+    if (selected && nearest !== drawn) { drawn = nearest; callbacks.draw(selected, nearest); callbacks.onProgress(nearest / (HERO_FRAME_COUNT - 1)); }
   }
   function trim() {
     const wanted = wantedSheets();
@@ -53,8 +53,8 @@ export function createHeroFrames<T extends { close(): void }>(
   function pump() {
     if (blocked()) return;
     const wanted = wantedSheets();
-    // Cancel irrelevant work immediately so a fast swipe cannot queue behind old frames.
-    for (const [key, job] of pending) if (!wanted.includes(key)) { job.abort(); pending.delete(key); }
+    // Signal obsolete work, but keep its slot until the native decode actually ends.
+    for (const [key, job] of pending) if (!wanted.includes(key)) { job.abort(); }
     for (const key of wanted) {
       if (pending.size >= 2) break;
       if (assets.has(key) || pending.has(key) || (failures.get(key) ?? 0) >= 2) continue;
@@ -73,10 +73,10 @@ export function createHeroFrames<T extends { close(): void }>(
     frame = 0;
     if (blocked()) return;
     const dt = Math.min(64, Math.max(1, time - lastTime)); lastTime = time;
-    eased += (target - eased) * (1 - Math.exp(-dt / 85));
+    eased += (target - eased) * (1 - Math.exp(-dt / 55));
     if (Math.abs(target - eased) < .0005) eased = target;
     index = Math.round(eased * (HERO_FRAME_COUNT - 1));
-    callbacks.onProgress(eased); render(); pump();
+    render(); pump();
     if (eased !== target) schedule();
   }
   function suspend() { if (frame) clock.cancelFrame(frame); frame = 0; }
@@ -98,20 +98,40 @@ export function createHeroFrames<T extends { close(): void }>(
 
 // Compressed bytes stay small; only the three nearby sheets remain decoded.
 const compressed = new Map<number, Blob>();
+const downloading = new Map<number, Promise<Blob>>();
 async function readSheet(index: number, signal: AbortSignal, priority: 'high' | 'low') {
+  if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
   const cached = compressed.get(index);
   if (cached) return cached;
-  const response = await fetch(heroSheetUrl(index), { signal, cache: 'force-cache', priority });
-  if (!response.ok) throw new Error('Animation image unavailable');
-  const blob = new Blob([await response.blob()], { type: 'image/webp' });
-  if (!signal.aborted) compressed.set(index, blob);
-  return blob;
+  let request = downloading.get(index);
+  if (!request) {
+    // Shared bytes remain useful after a fast swipe. Aborting a decode must not
+    // discard a download that the next scroll direction will need again.
+    request = fetch(heroSheetUrl(index), { cache: 'force-cache', priority }).then(async response => {
+      if (!response.ok) throw new Error('Animation image unavailable');
+      const blob = new Blob([await response.blob()], { type: 'image/webp' });
+      compressed.set(index, blob);
+      return blob;
+    }).finally(() => { downloading.delete(index); });
+    downloading.set(index, request);
+  }
+  return new Promise<Blob>((resolve, reject) => {
+    const abort = () => reject(new DOMException('Aborted', 'AbortError'));
+    signal.addEventListener('abort', abort, { once: true });
+    request!.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
+  });
 }
 export async function preloadHeroSheets(signal: AbortSignal) {
-  for (let index = 0; index < HERO_SHEET_COUNT && !signal.aborted; index++) {
-    try { await readSheet(index, signal, 'low'); } catch { if (signal.aborted) return; }
-  }
+  let next = 0;
+  const run = async () => {
+    while (next < HERO_SHEET_COUNT && !signal.aborted) {
+      const index = next++;
+      try { await readSheet(index, signal, 'low'); } catch { if (signal.aborted) return; }
+    }
+  };
+  await Promise.all([run(), run()]);
 }
+
 export async function loadHeroFrame(index: number, signal: AbortSignal) {
   const blob = await readSheet(index, signal, 'high');
   signal.throwIfAborted();

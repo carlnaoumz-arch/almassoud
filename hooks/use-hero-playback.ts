@@ -1,28 +1,52 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import { createHeroPlayback } from '../lib/hero-playback';
-import { createPhoneHero } from '../lib/hero-worker-client';
+import { createMobileIntro } from '../lib/mobile-intro';
 import { peekHeroSource, pendingHeroSource, prepareHeroSource, restoreHeroSource } from '../lib/hero-source';
-import { phoneHeroQuery, HERO_FRAME_WIDTH, HERO_FRAME_HEIGHT } from '../lib/hero-frames';
+const phoneHeroQuery = '(pointer: coarse), (max-width: 900px)';
 
 export function useHeroPlayback() {
   const scene = useRef<HTMLElement>(null);
   const video = useRef<HTMLVideoElement>(null);
-  const canvas = useRef<HTMLCanvasElement>(null);
+  const phoneVideo = useRef<HTMLVideoElement>(null);
+  const [fallback, setFallback] = useState(0);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
     const element = scene.current, film = video.current;
     if (!element || !film) return;
     const phone = window.matchMedia(phoneHeroQuery).matches;
-    const surface = canvas.current;
-    const context = phone ? surface?.getContext('2d', { alpha: false }) : null;
-    const frames = Boolean(phone && surface && context);
-    if (frames) { surface!.width = HERO_FRAME_WIDTH; surface!.height = HERO_FRAME_HEIGHT; }
-    element.dataset.renderer = frames ? 'frames' : 'video';
+    if (phone && phoneVideo.current) {
+      element.dataset.renderer = 'native-mobile';
+      let fallbackVersion = 0;
+      const mobile = phoneVideo.current;
+      const intro = createMobileIntro(mobile, {
+        onReady: () => { element.dataset.nativeReady = 'true'; },
+        onFallback: () => { setFallback(++fallbackVersion); },
+        onState: state => { element.dataset.playback = state; },
+      });
+      let visible = true;
+      const update = () => intro.setActive(visible && !document.hidden);
+      const observer = new IntersectionObserver(entries => { visible = entries[0].isIntersecting; update(); });
+      observer.observe(element);
+      const hide = () => intro.setActive(false);
+      const restore = (event: PageTransitionEvent) => {
+        update();
+        if (event.persisted) { setFallback(0); intro.restart(); }
+      };
+      document.addEventListener('visibilitychange', update);
+      window.addEventListener('pagehide', hide);
+      window.addEventListener('pageshow', restore);
+      return () => {
+        observer.disconnect(); intro.destroy();
+        document.removeEventListener('visibilitychange', update);
+        window.removeEventListener('pagehide', hide);
+        window.removeEventListener('pageshow', restore);
+      };
+    }
+    element.dataset.renderer = 'video';
     let disposed = false, frame = 0, active: boolean | undefined;
-    let geometryDirty = true, sceneTop = 0, sceneHeight = 0, scrollDistance = 1;
-    const cached = frames ? undefined : peekHeroSource();
+    const cached = peekHeroSource();
     if (cached && film.src !== cached) { film.src = cached; film.load(); }
     const useCompleteSource = (source: Promise<string | undefined>) => {
       void source.then(url => {
@@ -38,51 +62,35 @@ export function useHeroPlayback() {
       element.style.setProperty('--progress', String(progress));
       element.dataset.phase = progress < .25 ? 'grill' : progress < .68 ? 'ingredients' : 'platter';
     };
-    const playback = frames ? createPhoneHero(context!, {
-      onReady: () => setReady(true),
-      onProgress,
-      onFrame: index => { element.dataset.frameTime = ((29 + index) / 24).toFixed(3); },
-      onRenderer: (mode, reason) => { element.dataset.engine = mode; if (reason) element.dataset.engineFallback = reason; },
-    }) : createHeroPlayback(film, {
+    const playback = createHeroPlayback(film, {
       onReady: setReady,
       onProgress,
       onStall: () => useCompleteSource(prepareHeroSource()),
       onFrame: time => { element.dataset.frameTime = time.toFixed(3); },
     }, { intro: false });
-    if (frames) { film.pause(); }
-    else {
+    {
       // If a desktop window selected no initial source, start its normal video now.
       if (film.networkState === HTMLMediaElement.NETWORK_NO_SOURCE) film.load();
       const pending = pendingHeroSource();
       if (!cached) useCompleteSource(pending ?? restoreHeroSource());
     }
     const updateActivity = () => {
-      const bounds = frames
-        ? { top: sceneTop - window.scrollY, bottom: sceneTop + sceneHeight - window.scrollY }
-        : film.getBoundingClientRect();
+      const bounds = film.getBoundingClientRect();
       const next = !document.hidden && bounds.bottom > 0 && bounds.top < window.innerHeight;
       if (next !== active) { active = next; playback.setActive(next); }
     };
     const measure = () => {
       frame = 0;
-      if (frames && geometryDirty) {
-        sceneTop = element.getBoundingClientRect().top + window.scrollY;
-        sceneHeight = element.offsetHeight;
-        scrollDistance = Math.max(1, sceneHeight - (element.firstElementChild?.getBoundingClientRect().height ?? window.innerHeight));
-        geometryDirty = false;
-      }
       updateActivity();
-      if (frames) { playback.setProgress((window.scrollY - sceneTop) / scrollDistance); return; }
       const stickyHeight = element.firstElementChild?.getBoundingClientRect().height ?? window.innerHeight;
       const distance = Math.max(1, element.offsetHeight - stickyHeight);
       playback.setProgress(-element.getBoundingClientRect().top / distance);
     };
     const scroll = () => { if (!frame) frame = requestAnimationFrame(measure); };
-    const resize = () => { geometryDirty = true; scroll(); };
+    const resize = scroll;
     const visibility = () => { updateActivity(); if (!document.hidden) measure(); };
     const restore = () => {
       active = undefined;
-      geometryDirty = true;
       updateActivity();
       playback.resumeLoading();
       measure();
@@ -111,5 +119,5 @@ export function useHeroPlayback() {
     };
   }, []);
 
-  return { scene, video, canvas, ready };
+  return { scene, video, phoneVideo, ready, fallback };
 }

@@ -47,3 +47,11 @@ test('already completed native playback is shown after hydration without replay'
   const video=new Video();video.complete=true;const c=setup(video);
   assert.equal(c.states.at(-1),'complete');assert.equal(video.calls,0);assert.equal(c.ready(),1);c.intro.destroy();
 });
+
+test('ordinary slow-network buffering does not download the larger image fallback',async()=>{
+  const c=setup();await flush();c.video.readyState=2;
+  [...c.jobs.values()][0]();assert.equal(c.fallback(),0);
+  c.video.event('waiting');assert.equal(c.jobs.size,0);
+  c.video.readyState=4;c.video.event('canplay');await flush();
+  assert.equal(c.states.at(-1),'playing');assert.equal(c.fallback(),0);c.intro.destroy();
+});

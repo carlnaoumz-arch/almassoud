@@ -14,7 +14,10 @@ export function createMobileIntro(video: Media, callbacks: {
   };
   const watch = () => {
     clear();
-    if (active && !finished && !fallback) watchdog = timers.set(useFallback, 3000);
+    if (active && !finished && !fallback) watchdog = timers.set(() => {
+      // Network buffering is not a broken decoder: do not start another download.
+      if (video.readyState >= 3 && !video.paused) useFallback();
+    }, 3000);
   };
   const playing = () => {
     if (disposed || !active || fallback) return;
@@ -42,6 +45,8 @@ export function createMobileIntro(video: Media, callbacks: {
   video.muted = video.defaultMuted = video.playsInline = video.autoplay = true;
   video.loop = false;
   on('playing', playing); on('ended', ended); on('error', useFallback);
+  on('waiting', clear); on('stalled', clear);
+  on('pause', () => { if (!video.ended) attempt(); });
   on('canplay', attempt); on('loadeddata', attempt); on('timeupdate', () => { if (video.ended) ended(); else if (!video.paused) watch(); });
   if (finished) ended(); else attempt();
   return {
